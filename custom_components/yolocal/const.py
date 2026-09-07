@@ -7,6 +7,9 @@ CONF_HUB_IP = "hub_ip"
 CONF_CLIENT_ID = "client_id"
 CONF_CLIENT_SECRET = "client_secret"
 CONF_NET_ID = "net_id"
+CONF_CLOUD_CLIENT_ID = "cloud_client_id"
+CONF_CLOUD_CLIENT_SECRET = "cloud_client_secret"
+CONF_CLOUD_HUB_ID = "cloud_hub_id"
 
 # Default ports
 DEFAULT_HTTP_PORT = 1080

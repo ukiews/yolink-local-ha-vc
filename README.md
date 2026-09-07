@@ -40,7 +40,7 @@ The YoLink Local Hub supports both Matter and a native Local API. While Matter w
 | Manipulator | Valve | Open/close control, battery |
 | WaterLeakController | Valve | Open/close control, battery |
 | WaterMeterController | Valve | Open/close control, battery |
-| Hub | Diagnostic sensors | Local API, MQTT, authentication, IP address, polling latency, last HTTP/MQTT activity, managed-device health/counts, token expiry, and network/firmware details when reported |
+| Hub | Diagnostic sensors | Local API, MQTT, authentication, IP address, polling latency, last HTTP/MQTT activity, managed-device health/counts, token expiry, and optional cloud firmware/power/battery/network details |
 
 Additional device types can be added — contributions welcome!
 
@@ -106,6 +106,19 @@ You'll need four pieces of information from the YoLink app:
    - **Client ID**: From the Integrations tab
    - **Client Secret**: From the Integrations tab  
    - **Net ID**: From the General tab
+
+### Optional Cloud Hub Diagnostics
+
+The integration remains fully functional over the local network without a
+YoLink Cloud connection. To add read-only hub diagnostics, open the configured
+integration, select **Configure**, and enter a YoLink Personal Access Credential
+(UAC). Create a dedicated credential in the YoLink app under **Account →
+Advanced Settings → Personal Access Credentials**.
+
+Cloud diagnostics add the hub firmware version, hub online status, mains-power
+presence, backup-battery presence and operating state, active network details,
+and internal component versions. The UAC is stored only in the Home Assistant
+config entry. Clear both cloud credential fields to disable cloud access again.
 
 ## How It Works
 

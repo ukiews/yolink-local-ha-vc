@@ -20,5 +20,29 @@
     "abort": {
       "already_configured": "This hub is already configured"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Cloud hub diagnostics (optional)",
+        "description": "Add read-only YoLink Cloud diagnostics for the hub. Local discovery, MQTT, sensors, and controls do not require these credentials. Leave the UAID and secret blank to disable cloud diagnostics.",
+        "data": {
+          "cloud_client_id": "Cloud UAID",
+          "cloud_client_secret": "Cloud secret key",
+          "cloud_hub_id": "Hub Device EUI (optional if the account has one hub)"
+        },
+        "data_description": {
+          "cloud_client_id": "Personal Access Credential created under Account → Advanced Settings → Personal Access Credentials.",
+          "cloud_client_secret": "Secret belonging to the Personal Access Credential.",
+          "cloud_hub_id": "Selects the correct hub when the cloud account contains more than one."
+        }
+      }
+    },
+    "error": {
+      "cloud_credentials_incomplete": "Enter both the Cloud UAID and secret key, or leave both blank to disable cloud diagnostics.",
+      "invalid_cloud_auth": "The YoLink Cloud credentials were rejected.",
+      "invalid_cloud_hub": "The requested hub was not found or could not be read with these cloud credentials.",
+      "cannot_connect_cloud": "Could not connect to the YoLink Cloud API."
+    }
   }
 }

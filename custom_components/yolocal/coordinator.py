@@ -19,6 +19,7 @@ from .api import (
     DeviceEvent,
     TokenManager,
     YoLinkClient,
+    YoLinkCloudClient,
     YoLinkMQTTClient,
 )
 from .api.auth import AuthenticationError
@@ -45,6 +46,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         session: aiohttp.ClientSession,
         net_id: str,
         mqtt_port: int = 18080,
+        cloud_client: YoLinkCloudClient | None = None,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -58,6 +60,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._session = session
         self._net_id = net_id
         self._mqtt_port = mqtt_port
+        self._cloud_client = cloud_client
         self._mqtt_client: YoLinkMQTTClient | None = None
         self._devices: dict[str, Device] = {}
         self._states: dict[str, dict[str, Any]] = {}
@@ -67,6 +70,11 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def devices(self) -> dict[str, Device]:
         """Return the device registry."""
         return self._devices
+
+    @property
+    def cloud_diagnostics_enabled(self) -> bool:
+        """Return whether optional cloud hub diagnostics are configured."""
+        return self._cloud_client is not None
 
     async def _async_setup(self) -> None:
         """Set up the coordinator: fetch devices and connect MQTT."""
@@ -112,6 +120,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             if all_device_polls_succeeded and hub_poll_succeeded:
                 state["lastHttpPoll"] = datetime.now(timezone.utc)
             self._update_hub_runtime_diagnostics(state)
+            await self._update_cloud_hub_diagnostics(state)
 
     def _hub_device(self) -> Device | None:
         """Return the real or synthesized hub device."""
@@ -200,6 +209,32 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             state["tokenRefreshSuccessful"] = (
                 self._token_manager.last_refresh_success
             )
+
+    async def _update_cloud_hub_diagnostics(
+        self, state: dict[str, Any]
+    ) -> None:
+        """Update optional cloud-sourced diagnostics without affecting local I/O."""
+        if self._cloud_client is None:
+            return
+
+        try:
+            async with asyncio.timeout(15):
+                cloud_state = await self._cloud_client.async_get_hub_state()
+        except AuthenticationError:
+            _LOGGER.warning("YoLink Cloud diagnostics authentication failed")
+            state["cloudConnected"] = False
+            state["cloudAuthenticated"] = False
+        except Exception:
+            _LOGGER.warning("Failed to update optional YoLink Cloud diagnostics")
+            state["cloudConnected"] = False
+        else:
+            state["cloud"] = cloud_state
+            state["cloudConnected"] = True
+            state["cloudAuthenticated"] = True
+            state["lastCloudPoll"] = datetime.now(timezone.utc)
+            if self._cloud_client.hub is not None:
+                state["cloudHubId"] = self._cloud_client.hub.device_id
+                state["cloudHubModel"] = self._cloud_client.hub.model
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Poll device states via HTTP as a fallback.
@@ -295,6 +330,9 @@ async def create_coordinator(
     net_id: str,
     http_port: int = 1080,
     mqtt_port: int = 18080,
+    cloud_client_id: str | None = None,
+    cloud_client_secret: str | None = None,
+    cloud_hub_id: str | None = None,
 ) -> YoLocalCoordinator:
     """Create and initialize a coordinator.
 
@@ -311,8 +349,23 @@ async def create_coordinator(
 
         client = YoLinkClient(host, token_manager, session, http_port)
 
+        cloud_client = None
+        if cloud_client_id and cloud_client_secret:
+            cloud_client = YoLinkCloudClient(
+                client_id=cloud_client_id,
+                client_secret=cloud_client_secret,
+                session=session,
+                hub_device_id=cloud_hub_id,
+            )
+
         coordinator = YoLocalCoordinator(
-            hass, client, token_manager, session, net_id, mqtt_port
+            hass,
+            client,
+            token_manager,
+            session,
+            net_id,
+            mqtt_port,
+            cloud_client,
         )
         await coordinator._async_setup()
 

@@ -39,6 +39,13 @@ BATTERY_DEVICE_TYPES = frozenset(
 POWER_SOURCE_DEVICE_TYPES = frozenset(
     {"Manipulator", "WaterLeakController", "WaterMeterController"}
 )
+CLOUD_BATTERY_STATES = {
+    0: "not_connected",
+    1: "powering_hub",
+    2: "charging",
+    3: "standing_by",
+    4: "maintenance",
+}
 
 
 def _state_value(device_state: dict[str, Any], key: str) -> Any:
@@ -73,6 +80,12 @@ def _battery_percentage(device_state: dict[str, Any]) -> int | None:
     return numeric_level * 25
 
 
+def _cloud_state(device_state: dict[str, Any]) -> dict[str, Any]:
+    """Return cloud hub data when optional diagnostics are configured."""
+    state = device_state.get("cloud")
+    return state if isinstance(state, dict) else {}
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -96,6 +109,12 @@ async def async_setup_entry(
             entities.append(YoLocalHubLastHTTPPollSensor(coordinator, device))
             entities.append(YoLocalHubLastMQTTMessageSensor(coordinator, device))
             entities.append(YoLocalHubTokenExpirySensor(coordinator, device))
+            if coordinator.cloud_diagnostics_enabled:
+                entities.append(YoLocalHubCloudFirmwareSensor(coordinator, device))
+                entities.append(YoLocalHubCloudBatteryStateSensor(coordinator, device))
+                entities.append(YoLocalHubCloudNetworkSensor(coordinator, device))
+                entities.append(YoLocalHubCloudComponentsSensor(coordinator, device))
+                entities.append(YoLocalHubLastCloudPollSensor(coordinator, device))
             if _state_value(
                 coordinator.get_state(device.device_id), "version"
             ) is not None:
@@ -445,3 +464,157 @@ class YoLocalHubTokenExpirySensor(YoLocalEntity, SensorEntity):
                 "tokenRefreshSuccessful"
             ]
         return attributes
+
+
+class YoLocalHubCloudFirmwareSensor(YoLocalEntity, SensorEntity):
+    """Hub firmware version obtained through optional cloud diagnostics."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:cloud-check-variant"
+    _attr_name = "Cloud firmware"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the cloud firmware sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_cloud_firmware"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the hub firmware reported by YoLink Cloud."""
+        version = _cloud_state(self.device_state).get("version")
+        return str(version) if version is not None else None
+
+
+class YoLocalHubCloudBatteryStateSensor(YoLocalEntity, SensorEntity):
+    """Operating state of the hub backup battery."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:battery-heart-variant"
+    _attr_name = "Cloud battery state"
+    _attr_options = list(CLOUD_BATTERY_STATES.values())
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the cloud battery-state sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_cloud_battery_state"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the documented meaning of the cloud battery-state code."""
+        other = _cloud_state(self.device_state).get("other")
+        power = other.get("power") if isinstance(other, dict) else None
+        code = power.get("batteryState") if isinstance(power, dict) else None
+        return CLOUD_BATTERY_STATES.get(code)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the raw YoLink battery-state code."""
+        other = _cloud_state(self.device_state).get("other")
+        power = other.get("power") if isinstance(other, dict) else None
+        if not isinstance(power, dict) or "batteryState" not in power:
+            return {}
+        return {"raw_battery_state": power["batteryState"]}
+
+
+class YoLocalHubCloudNetworkSensor(YoLocalEntity, SensorEntity):
+    """Active network interface reported by YoLink Cloud."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:cloud-sync-outline"
+    _attr_name = "Cloud network"
+    _attr_options = ["ethernet", "wi_fi", "disconnected"]
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the cloud network sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_cloud_network"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the active cloud-reported network interface."""
+        state = _cloud_state(self.device_state)
+        if not state:
+            return None
+        if isinstance(state.get("eth"), dict) and state["eth"].get("enable"):
+            return "ethernet"
+        if isinstance(state.get("wifi"), dict) and state["wifi"].get("enable"):
+            return "wi_fi"
+        return "disconnected"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return cloud-reported Ethernet and Wi-Fi details."""
+        attributes: dict[str, Any] = {}
+        state = _cloud_state(self.device_state)
+        for prefix, interface_name in (("ethernet", "eth"), ("wifi", "wifi")):
+            interface = state.get(interface_name)
+            if not isinstance(interface, dict):
+                continue
+            for source, target in (
+                ("enable", "connected"),
+                ("ip", "ip_address"),
+                ("gateway", "gateway"),
+                ("mask", "subnet_mask"),
+                ("ssid", "ssid"),
+            ):
+                if source in interface:
+                    attributes[f"{prefix}_{target}"] = interface[source]
+        return attributes
+
+
+class YoLocalHubCloudComponentsSensor(YoLocalEntity, SensorEntity):
+    """Internal hub component versions reported by YoLink Cloud."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:expansion-card-variant"
+    _attr_name = "Cloud component versions"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the component-version sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_cloud_components"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the communications component version."""
+        other = _cloud_state(self.device_state).get("other")
+        version = other.get("comVer") if isinstance(other, dict) else None
+        return str(version) if version is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return other useful internal component versions."""
+        other = _cloud_state(self.device_state).get("other")
+        if not isinstance(other, dict):
+            return {}
+        attributes: dict[str, Any] = {}
+        for source, target in (
+            ("netVer", "network_version"),
+            ("codecVer", "codec_version"),
+            ("timezone", "timezone"),
+            ("supportNRP", "supports_nrp"),
+        ):
+            if source in other:
+                attributes[target] = other[source]
+        return attributes
+
+
+class YoLocalHubLastCloudPollSensor(YoLocalEntity, SensorEntity):
+    """Time of the last successful optional cloud diagnostics update."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:cloud-clock-outline"
+    _attr_name = "Cloud last successful poll"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the cloud polling timestamp sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_last_cloud_poll"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the timestamp of the last successful cloud update."""
+        return self.device_state.get("lastCloudPoll")

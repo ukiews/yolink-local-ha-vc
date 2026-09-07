@@ -10,6 +10,9 @@ from homeassistant.core import HomeAssistant
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
+    CONF_CLOUD_CLIENT_ID,
+    CONF_CLOUD_CLIENT_SECRET,
+    CONF_CLOUD_HUB_ID,
     CONF_HUB_IP,
     CONF_NET_ID,
     DEFAULT_HTTP_PORT,
@@ -35,6 +38,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             net_id=entry.data[CONF_NET_ID],
             http_port=DEFAULT_HTTP_PORT,
             mqtt_port=DEFAULT_MQTT_PORT,
+            cloud_client_id=entry.options.get(CONF_CLOUD_CLIENT_ID) or None,
+            cloud_client_secret=entry.options.get(CONF_CLOUD_CLIENT_SECRET) or None,
+            cloud_hub_id=entry.options.get(CONF_CLOUD_HUB_ID) or None,
         )
     except Exception:
         _LOGGER.exception("Failed to set up YoLink Local")

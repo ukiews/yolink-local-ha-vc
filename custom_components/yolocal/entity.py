@@ -34,6 +34,10 @@ class YoLocalEntity(CoordinatorEntity[YoLocalCoordinator]):
         version = state.get("version") if isinstance(state, dict) else None
         if version is None:
             version = self.device_state.get("version")
+        if version is None and self._device.device_type == "Hub":
+            cloud = self.device_state.get("cloud")
+            if isinstance(cloud, dict):
+                version = cloud.get("version")
 
         return DeviceInfo(
             identifiers={(DOMAIN, self._device.device_id)},
