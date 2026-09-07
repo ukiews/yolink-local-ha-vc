@@ -59,6 +59,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt_client: YoLinkMQTTClient | None = None
         self._devices: dict[str, Device] = {}
         self._states: dict[str, dict[str, Any]] = {}
+        self._virtual_hub_id: str | None = None
 
     @property
     def devices(self) -> dict[str, Device]:
@@ -68,6 +69,20 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def _async_setup(self) -> None:
         """Set up the coordinator: fetch devices and connect MQTT."""
         devices = await self._client.get_devices()
+
+        # Some Local Hub firmware omits the hub from Home.getDeviceList. Add a
+        # stable virtual device so the connection still has HA diagnostics.
+        if not any(device.device_type == "Hub" for device in devices):
+            self._virtual_hub_id = f"local_hub_{self._client.host}"
+            devices.append(
+                Device(
+                    device_id=self._virtual_hub_id,
+                    name=f"YoLink Hub ({self._client.host})",
+                    token="",
+                    device_type="Hub",
+                )
+            )
+
         self._devices = {d.device_id: d for d in devices}
 
         await self._fetch_all_states()
@@ -76,12 +91,53 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def _fetch_all_states(self) -> None:
         """Fetch current state for all devices via HTTP API."""
         for device in self._devices.values():
+            if device.device_id == self._virtual_hub_id:
+                continue
             try:
                 state = await self._client.get_state(device)
                 self._states[device.device_id] = state
             except Exception:
                 _LOGGER.warning("Failed to get state for %s", device.name)
                 self._states.setdefault(device.device_id, {})
+
+        await self._update_hub_diagnostics()
+
+    async def _update_hub_diagnostics(self) -> None:
+        """Update diagnostics for a real or synthesized Local Hub device."""
+        hub = next(
+            (
+                device
+                for device in self._devices.values()
+                if device.device_type == "Hub"
+            ),
+            None,
+        )
+        if hub is None:
+            return
+
+        state = self._states.setdefault(hub.device_id, {})
+        state.update(
+            {
+                "ip": self._client.host,
+                "managedDevices": sum(
+                    device.device_type != "Hub"
+                    for device in self._devices.values()
+                ),
+                "httpPort": self._client.port,
+                "mqttPort": self._mqtt_port,
+            }
+        )
+
+        try:
+            home_info = await self._client.get_home_info()
+        except Exception:
+            _LOGGER.warning("Failed to get Local Hub general information")
+            if hub.device_id == self._virtual_hub_id:
+                state["online"] = False
+        else:
+            state["homeId"] = home_info.get("id")
+            if hub.device_id == self._virtual_hub_id:
+                state["online"] = True
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Poll device states via HTTP as a fallback.
@@ -183,4 +239,3 @@ async def create_coordinator(
     except Exception:
         await session.close()
         raise
-

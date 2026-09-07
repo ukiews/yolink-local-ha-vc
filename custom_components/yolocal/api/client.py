@@ -36,6 +36,11 @@ class YoLinkClient:
         return self._host
 
     @property
+    def port(self) -> int:
+        """Return the hub HTTP API port."""
+        return self._port
+
+    @property
     def base_url(self) -> str:
         """Return the base URL for the hub."""
         return f"http://{self._host}:{self._port}"
@@ -44,6 +49,10 @@ class YoLinkClient:
         """Fetch the list of devices from the hub."""
         result = await self._request({"method": "Home.getDeviceList"})
         return [Device.from_api(d) for d in result.get("devices", [])]
+
+    async def get_home_info(self) -> dict[str, Any]:
+        """Fetch general information about the local YoLink home."""
+        return await self._request({"method": "Home.getGeneralInfo"})
 
     async def get_state(self, device: Device) -> dict[str, Any]:
         """Get the current state of a device."""

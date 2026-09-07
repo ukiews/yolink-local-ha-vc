@@ -40,12 +40,20 @@ async def async_setup_entry(
         if device.device_type in DEVICE_TYPE_TO_CLASS:
             entities.append(YoLocalBinarySensor(coordinator, device))
         if device.device_type == "Hub":
-            entities.append(
-                YoLocalHubConnectivitySensor(coordinator, device, "eth", "Ethernet")
-            )
-            entities.append(
-                YoLocalHubConnectivitySensor(coordinator, device, "wifi", "Wi-Fi")
-            )
+            entities.append(YoLocalHubAPIConnectivitySensor(coordinator, device))
+            state = coordinator.get_state(device.device_id)
+            if isinstance(state.get("eth"), dict):
+                entities.append(
+                    YoLocalHubConnectivitySensor(
+                        coordinator, device, "eth", "Ethernet"
+                    )
+                )
+            if isinstance(state.get("wifi"), dict):
+                entities.append(
+                    YoLocalHubConnectivitySensor(
+                        coordinator, device, "wifi", "Wi-Fi"
+                    )
+                )
 
     async_add_entities(entities)
 
@@ -101,3 +109,21 @@ class YoLocalHubConnectivitySensor(YoLocalEntity, BinarySensorEntity):
         if not isinstance(interface, dict) or "enable" not in interface:
             return None
         return bool(interface["enable"])
+
+
+class YoLocalHubAPIConnectivitySensor(YoLocalEntity, BinarySensorEntity):
+    """Connectivity status of the YoLink Local HTTP API."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Local API"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the Local API connectivity sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_api_connectivity"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True when the Local API is reachable."""
+        return bool(self.device_state.get("online", True))

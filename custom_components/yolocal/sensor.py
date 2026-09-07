@@ -26,6 +26,7 @@ BATTERY_DEVICE_TYPES = frozenset(
         "DoorSensor",
         "LeakSensor",
         "Lock",
+        "Manipulator",
         "MotionSensor",
         "Siren",
         "SmartRemoter",
@@ -36,7 +37,7 @@ BATTERY_DEVICE_TYPES = frozenset(
     }
 )
 POWER_SOURCE_DEVICE_TYPES = frozenset(
-    {"WaterLeakController", "WaterMeterController"}
+    {"Manipulator", "WaterLeakController", "WaterMeterController"}
 )
 
 
@@ -87,8 +88,12 @@ async def async_setup_entry(
             entities.append(YoLocalHumiditySensor(coordinator, device))
 
         if device.device_type == "Hub":
-            entities.append(YoLocalHubFirmwareSensor(coordinator, device))
             entities.append(YoLocalHubIPAddressSensor(coordinator, device))
+            entities.append(YoLocalHubDeviceCountSensor(coordinator, device))
+            if _state_value(
+                coordinator.get_state(device.device_id), "version"
+            ) is not None:
+                entities.append(YoLocalHubFirmwareSensor(coordinator, device))
 
         if device.device_type in POWER_SOURCE_DEVICE_TYPES:
             entities.append(YoLocalPowerSourceSensor(coordinator, device))
@@ -238,7 +243,8 @@ class YoLocalHubIPAddressSensor(YoLocalEntity, SensorEntity):
             interface = self.device_state.get(interface_name)
             if isinstance(interface, dict) and interface.get("ip"):
                 return str(interface["ip"])
-        return None
+        address = self.device_state.get("ip")
+        return str(address) if address else None
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -258,4 +264,30 @@ class YoLocalHubIPAddressSensor(YoLocalEntity, SensorEntity):
                     attributes[f"{prefix}_{target}"] = interface[source]
             if interface_name == "wifi" and "ssid" in interface:
                 attributes["wifi_ssid"] = interface["ssid"]
+        for source, target in (
+            ("homeId", "home_id"),
+            ("httpPort", "local_api_port"),
+            ("mqttPort", "mqtt_port"),
+        ):
+            if source in self.device_state:
+                attributes[target] = self.device_state[source]
         return attributes
+
+
+class YoLocalHubDeviceCountSensor(YoLocalEntity, SensorEntity):
+    """Number of devices managed by the YoLink Local Hub."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:devices"
+    _attr_name = "Managed devices"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the managed device count sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_managed_devices"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of devices managed by the hub."""
+        count = self.device_state.get("managedDevices")
+        return count if isinstance(count, int) else None
