@@ -40,6 +40,7 @@ The YoLink Local Hub supports both Matter and a native Local API. While Matter w
 | Manipulator | Valve | Open/close control, battery |
 | WaterLeakController | Valve | Open/close control, battery |
 | WaterMeterController | Valve | Open/close control, battery |
+| Hub | Diagnostic sensors | Firmware, IP address, Ethernet/Wi-Fi status |
 
 Additional device types can be added — contributions welcome!
 
