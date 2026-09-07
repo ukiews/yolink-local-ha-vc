@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import timedelta
+from collections import Counter
+from datetime import datetime, timedelta, timezone
+from time import monotonic
 from typing import Any
 
 import aiohttp
@@ -90,6 +92,8 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def _fetch_all_states(self) -> None:
         """Fetch current state for all devices via HTTP API."""
+        started = monotonic()
+        all_device_polls_succeeded = True
         for device in self._devices.values():
             if device.device_id == self._virtual_hub_id:
                 continue
@@ -98,13 +102,20 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 self._states[device.device_id] = state
             except Exception:
                 _LOGGER.warning("Failed to get state for %s", device.name)
-                self._states.setdefault(device.device_id, {})
+                all_device_polls_succeeded = False
+                self._states.setdefault(device.device_id, {})["online"] = False
 
-        await self._update_hub_diagnostics()
+        hub_poll_succeeded = await self._update_hub_diagnostics()
+        state = self._hub_state()
+        if state is not None:
+            state["httpLatencyMs"] = round((monotonic() - started) * 1000, 1)
+            if all_device_polls_succeeded and hub_poll_succeeded:
+                state["lastHttpPoll"] = datetime.now(timezone.utc)
+            self._update_hub_runtime_diagnostics(state)
 
-    async def _update_hub_diagnostics(self) -> None:
-        """Update diagnostics for a real or synthesized Local Hub device."""
-        hub = next(
+    def _hub_device(self) -> Device | None:
+        """Return the real or synthesized hub device."""
+        return next(
             (
                 device
                 for device in self._devices.values()
@@ -112,8 +123,17 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ),
             None,
         )
+
+    def _hub_state(self) -> dict[str, Any] | None:
+        """Return the hub state, creating it when a hub exists."""
+        hub = self._hub_device()
+        return self._states.setdefault(hub.device_id, {}) if hub else None
+
+    async def _update_hub_diagnostics(self) -> bool:
+        """Update diagnostics for a real or synthesized Local Hub device."""
+        hub = self._hub_device()
         if hub is None:
-            return
+            return False
 
         state = self._states.setdefault(hub.device_id, {})
         state.update(
@@ -134,10 +154,52 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             _LOGGER.warning("Failed to get Local Hub general information")
             if hub.device_id == self._virtual_hub_id:
                 state["online"] = False
+            return False
         else:
             state["homeId"] = home_info.get("id")
             if hub.device_id == self._virtual_hub_id:
                 state["online"] = True
+            return True
+
+    def _update_hub_runtime_diagnostics(
+        self, state: dict[str, Any]
+    ) -> None:
+        """Update integration-health diagnostics on the hub device."""
+        managed_devices = [
+            device
+            for device in self._devices.values()
+            if device.device_type != "Hub"
+        ]
+        online_devices = sum(
+            self._states.get(device.device_id, {}).get("online", True) is not False
+            for device in managed_devices
+        )
+        device_types = Counter(device.device_type for device in managed_devices)
+
+        state.update(
+            {
+                "mqttConnected": bool(
+                    self._mqtt_client and self._mqtt_client.connected
+                ),
+                "authValid": self._token_manager.is_valid,
+                "onlineDevices": online_devices,
+                "offlineDevices": len(managed_devices) - online_devices,
+                "deviceTypes": dict(sorted(device_types.items())),
+            }
+        )
+
+        if self._token_manager.expires_at is not None:
+            state["tokenExpiresAt"] = datetime.fromtimestamp(
+                self._token_manager.expires_at, timezone.utc
+            )
+        if self._token_manager.last_refresh_at is not None:
+            state["lastTokenRefresh"] = datetime.fromtimestamp(
+                self._token_manager.last_refresh_at, timezone.utc
+            )
+        if self._token_manager.last_refresh_success is not None:
+            state["tokenRefreshSuccessful"] = (
+                self._token_manager.last_refresh_success
+            )
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         """Poll device states via HTTP as a fallback.
@@ -168,12 +230,26 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             port=self._mqtt_port,
         )
         self._mqtt_client.subscribe(self._on_device_event)
+        self._mqtt_client.subscribe_connection(self._on_mqtt_connection_change)
 
         try:
             await self._mqtt_client.connect()
             _LOGGER.info("Connected to YoLink MQTT broker")
         except Exception:
             _LOGGER.exception("Failed to connect to MQTT broker")
+            state = self._hub_state()
+            if state is not None:
+                state["mqttConnected"] = False
+                self.async_set_updated_data(self._states.copy())
+
+    @callback
+    def _on_mqtt_connection_change(self, connected: bool) -> None:
+        """Handle MQTT connection status changes."""
+        state = self._hub_state()
+        if state is None:
+            return
+        state["mqttConnected"] = connected
+        self.async_set_updated_data(self._states.copy())
 
     @callback
     def _on_device_event(self, event: DeviceEvent) -> None:
@@ -183,9 +259,14 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         partial events (e.g. connectivity-only updates) don't wipe out
         previously known sensor readings like temperature and humidity.
         """
+        hub_state = self._hub_state()
+        if hub_state is not None:
+            hub_state["lastMqttMessage"] = datetime.now(timezone.utc)
+
         device_id = event.device_id
         if device_id not in self._devices:
             _LOGGER.debug("Ignoring event for unknown device: %s", device_id)
+            self.async_set_updated_data(self._states.copy())
             return
 
         existing = self._states.get(device_id, {})

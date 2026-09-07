@@ -33,6 +33,8 @@ class TokenManager:
         self._session = session
         self._token: str | None = None
         self._expires_at: float = 0
+        self._last_refresh_at: float | None = None
+        self._last_refresh_success: bool | None = None
 
     @property
     def base_url(self) -> str:
@@ -43,6 +45,26 @@ class TokenManager:
     def client_id(self) -> str:
         """Return the client ID (needed for MQTT auth)."""
         return self._client_id
+
+    @property
+    def is_valid(self) -> bool:
+        """Return whether an unexpired access token is available."""
+        return self._token is not None and time.time() < self._expires_at
+
+    @property
+    def expires_at(self) -> float | None:
+        """Return the access-token expiry as a Unix timestamp."""
+        return self._expires_at or None
+
+    @property
+    def last_refresh_at(self) -> float | None:
+        """Return the time of the most recent refresh attempt."""
+        return self._last_refresh_at
+
+    @property
+    def last_refresh_success(self) -> bool | None:
+        """Return the result of the most recent refresh attempt."""
+        return self._last_refresh_success
 
     async def get_token(self) -> str:
         """Return a valid token, refreshing if needed."""
@@ -60,21 +82,27 @@ class TokenManager:
 
     async def _refresh(self) -> None:
         """Obtain a new token from the hub."""
+        self._last_refresh_at = time.time()
         url = f"{self.base_url}/open/yolink/token"
         data = {
             "grant_type": "client_credentials",
             "client_id": self._client_id,
             "client_secret": self._client_secret,
         }
-        async with self._session.post(url, data=data) as resp:
-            resp.raise_for_status()
-            result = await resp.json()
+        try:
+            async with self._session.post(url, data=data) as resp:
+                resp.raise_for_status()
+                result = await resp.json()
+        except Exception:
+            self._last_refresh_success = False
+            raise
 
         if "access_token" not in result:
+            self._last_refresh_success = False
             raise AuthenticationError(f"Auth failed: {result}")
 
         self._token = result["access_token"]
         # Token expires_in is in seconds
         expires_in = result.get("expires_in", 7200)
         self._expires_at = time.time() + expires_in
-
+        self._last_refresh_success = True

@@ -35,6 +35,7 @@ class DeviceEvent:
 
 
 EventCallback = Callable[[DeviceEvent], None]
+ConnectionCallback = Callable[[bool], None]
 
 
 class YoLinkMQTTClient:
@@ -56,6 +57,7 @@ class YoLinkMQTTClient:
         self._access_token = access_token
         self._client: mqtt.Client | None = None
         self._callbacks: list[EventCallback] = []
+        self._connection_callbacks: list[ConnectionCallback] = []
         self._connected = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
 
@@ -64,10 +66,22 @@ class YoLinkMQTTClient:
         """Return the subscription topic."""
         return f"ylsubnet/{self._net_id}/+/report"
 
+    @property
+    def connected(self) -> bool:
+        """Return whether the MQTT client is connected."""
+        return self._connected.is_set()
+
     def subscribe(self, callback: EventCallback) -> Callable[[], None]:
         """Subscribe to device events. Returns unsubscribe function."""
         self._callbacks.append(callback)
         return lambda: self._callbacks.remove(callback)
+
+    def subscribe_connection(
+        self, callback: ConnectionCallback
+    ) -> Callable[[], None]:
+        """Subscribe to MQTT connection changes."""
+        self._connection_callbacks.append(callback)
+        return lambda: self._connection_callbacks.remove(callback)
 
     async def connect(self) -> None:
         """Connect to the MQTT broker."""
@@ -94,6 +108,18 @@ class YoLinkMQTTClient:
             self._client.disconnect()
             self._client = None
         self._connected.clear()
+        self._notify_connection(False)
+
+    def _notify_connection(self, connected: bool) -> None:
+        """Notify connection-status subscribers on the HA event loop."""
+        for callback in self._connection_callbacks:
+            try:
+                if self._loop:
+                    self._loop.call_soon_threadsafe(callback, connected)
+                else:
+                    callback(connected)
+            except Exception:
+                _LOGGER.exception("Error in MQTT connection callback")
 
     def _on_connect(
         self,
@@ -109,6 +135,7 @@ class YoLinkMQTTClient:
             client.subscribe(self.topic)
             if self._loop:
                 self._loop.call_soon_threadsafe(self._connected.set)
+            self._notify_connection(True)
         else:
             _LOGGER.error("MQTT connection failed: %s", rc)
 
@@ -123,6 +150,7 @@ class YoLinkMQTTClient:
         """Handle disconnection."""
         _LOGGER.warning("Disconnected from MQTT broker: %s", rc)
         self._connected.clear()
+        self._notify_connection(False)
 
     def _on_message(
         self,
@@ -146,4 +174,3 @@ class YoLinkMQTTClient:
             _LOGGER.error("Failed to decode MQTT message: %s", msg.payload)
         except Exception:
             _LOGGER.exception("Error processing MQTT message")
-

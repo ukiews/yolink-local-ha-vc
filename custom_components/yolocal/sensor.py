@@ -10,7 +10,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfTemperature
+from homeassistant.const import PERCENTAGE, UnitOfTemperature, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -90,12 +90,22 @@ async def async_setup_entry(
         if device.device_type == "Hub":
             entities.append(YoLocalHubIPAddressSensor(coordinator, device))
             entities.append(YoLocalHubDeviceCountSensor(coordinator, device))
+            entities.append(YoLocalHubHTTPLatencySensor(coordinator, device))
+            entities.append(YoLocalHubLastHTTPPollSensor(coordinator, device))
+            entities.append(YoLocalHubLastMQTTMessageSensor(coordinator, device))
+            entities.append(YoLocalHubTokenExpirySensor(coordinator, device))
             if _state_value(
                 coordinator.get_state(device.device_id), "version"
             ) is not None:
                 entities.append(YoLocalHubFirmwareSensor(coordinator, device))
 
-        if device.device_type in POWER_SOURCE_DEVICE_TYPES:
+        if (
+            device.device_type in POWER_SOURCE_DEVICE_TYPES
+            or _state_value(
+                coordinator.get_state(device.device_id), "powerSupply"
+            )
+            is not None
+        ):
             entities.append(YoLocalPowerSourceSensor(coordinator, device))
 
         if (
@@ -291,3 +301,105 @@ class YoLocalHubDeviceCountSensor(YoLocalEntity, SensorEntity):
         """Return the number of devices managed by the hub."""
         count = self.device_state.get("managedDevices")
         return count if isinstance(count, int) else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return online counts and a breakdown by device type."""
+        attributes: dict[str, Any] = {}
+        for source, target in (
+            ("onlineDevices", "online_devices"),
+            ("offlineDevices", "offline_devices"),
+            ("deviceTypes", "device_types"),
+        ):
+            if source in self.device_state:
+                attributes[target] = self.device_state[source]
+        return attributes
+
+
+class YoLocalHubHTTPLatencySensor(YoLocalEntity, SensorEntity):
+    """Duration of the most recent Local API polling cycle."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:timer-outline"
+    _attr_name = "HTTP response latency"
+    _attr_native_unit_of_measurement = UnitOfTime.MILLISECONDS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the HTTP latency sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_http_latency"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the latest polling-cycle duration in milliseconds."""
+        value = self.device_state.get("httpLatencyMs")
+        return value if isinstance(value, (int, float)) else None
+
+
+class YoLocalHubLastHTTPPollSensor(YoLocalEntity, SensorEntity):
+    """Time of the last fully successful Local API poll."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Last successful HTTP poll"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the last HTTP poll sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_last_http_poll"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the timestamp of the last successful HTTP poll."""
+        return self.device_state.get("lastHttpPoll")
+
+
+class YoLocalHubLastMQTTMessageSensor(YoLocalEntity, SensorEntity):
+    """Time of the last MQTT device message."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "Last MQTT message"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the last MQTT message sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_last_mqtt_message"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the timestamp of the most recent MQTT message."""
+        return self.device_state.get("lastMqttMessage")
+
+
+class YoLocalHubTokenExpirySensor(YoLocalEntity, SensorEntity):
+    """Expiry time and refresh details for the Local API access token."""
+
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:key-clock"
+    _attr_name = "Access token expiration"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the access-token expiry sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_token_expiry"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the access-token expiration timestamp."""
+        return self.device_state.get("tokenExpiresAt")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return details of the latest token refresh attempt."""
+        attributes: dict[str, Any] = {}
+        if "lastTokenRefresh" in self.device_state:
+            attributes["last_refresh"] = self.device_state["lastTokenRefresh"]
+        if "tokenRefreshSuccessful" in self.device_state:
+            attributes["last_refresh_successful"] = self.device_state[
+                "tokenRefreshSuccessful"
+            ]
+        return attributes

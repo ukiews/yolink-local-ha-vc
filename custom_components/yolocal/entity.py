@@ -51,5 +51,9 @@ class YoLocalEntity(CoordinatorEntity[YoLocalCoordinator]):
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
+        # Hub diagnostic entities must remain visible so an outage can be
+        # represented as "off" instead of making the diagnostic unavailable.
+        if self._device.device_type == "Hub":
+            return True
         state = self.device_state
         return state.get("online", True)

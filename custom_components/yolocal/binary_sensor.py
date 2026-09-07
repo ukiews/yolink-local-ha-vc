@@ -41,6 +41,8 @@ async def async_setup_entry(
             entities.append(YoLocalBinarySensor(coordinator, device))
         if device.device_type == "Hub":
             entities.append(YoLocalHubAPIConnectivitySensor(coordinator, device))
+            entities.append(YoLocalHubMQTTConnectivitySensor(coordinator, device))
+            entities.append(YoLocalHubAuthenticationSensor(coordinator, device))
             state = coordinator.get_state(device.device_id)
             if isinstance(state.get("eth"), dict):
                 entities.append(
@@ -127,3 +129,40 @@ class YoLocalHubAPIConnectivitySensor(YoLocalEntity, BinarySensorEntity):
     def is_on(self) -> bool:
         """Return True when the Local API is reachable."""
         return bool(self.device_state.get("online", True))
+
+
+class YoLocalHubMQTTConnectivitySensor(YoLocalEntity, BinarySensorEntity):
+    """Connectivity status of the YoLink Local MQTT broker."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_name = "MQTT"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the MQTT connectivity sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_mqtt_connectivity"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True when MQTT is connected."""
+        return bool(self.device_state.get("mqttConnected", False))
+
+
+class YoLocalHubAuthenticationSensor(YoLocalEntity, BinarySensorEntity):
+    """Validity status of the YoLink Local API access token."""
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:key-variant"
+    _attr_name = "Authentication"
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the authentication status sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_authentication"
+
+    @property
+    def is_on(self) -> bool:
+        """Return True when an unexpired access token is available."""
+        return bool(self.device_state.get("authValid", False))
