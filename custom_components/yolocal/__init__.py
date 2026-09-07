@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_CLIENT_ID,
@@ -23,6 +24,37 @@ from .const import (
 from .coordinator import YoLocalCoordinator, create_coordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+OBSOLETE_CLOUD_ENTITY_SUFFIXES = frozenset(
+    {
+        "cloud_firmware",
+        "cloud_connectivity",
+        "cloud_authentication",
+        "cloud_online",
+    }
+)
+
+
+def _remove_obsolete_cloud_entities(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: YoLocalCoordinator,
+) -> None:
+    """Remove cloud entities superseded by metadata or compact attributes."""
+    hub_ids = {
+        device.device_id
+        for device in coordinator.devices.values()
+        if device.device_type == "Hub"
+    }
+    obsolete_unique_ids = {
+        f"{hub_id}_{suffix}"
+        for hub_id in hub_ids
+        for suffix in OBSOLETE_CLOUD_ENTITY_SUFFIXES
+    }
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity.unique_id in obsolete_unique_ids:
+            registry.async_remove(entity.entity_id)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -47,6 +79,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
+    _remove_obsolete_cloud_entities(hass, entry, coordinator)
 
     # Perform the first data refresh so the coordinator (and therefore
     # all entities) have valid state before platforms are set up.

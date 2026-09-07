@@ -110,7 +110,6 @@ async def async_setup_entry(
             entities.append(YoLocalHubLastMQTTMessageSensor(coordinator, device))
             entities.append(YoLocalHubTokenExpirySensor(coordinator, device))
             if coordinator.cloud_diagnostics_enabled:
-                entities.append(YoLocalHubCloudFirmwareSensor(coordinator, device))
                 entities.append(YoLocalHubCloudBatteryStateSensor(coordinator, device))
                 entities.append(YoLocalHubCloudNetworkSensor(coordinator, device))
                 entities.append(YoLocalHubCloudComponentsSensor(coordinator, device))
@@ -466,32 +465,13 @@ class YoLocalHubTokenExpirySensor(YoLocalEntity, SensorEntity):
         return attributes
 
 
-class YoLocalHubCloudFirmwareSensor(YoLocalEntity, SensorEntity):
-    """Hub firmware version obtained through optional cloud diagnostics."""
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:cloud-check-variant"
-    _attr_name = "Cloud firmware"
-
-    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
-        """Initialize the cloud firmware sensor."""
-        super().__init__(coordinator, device)
-        self._attr_unique_id = f"{device.device_id}_cloud_firmware"
-
-    @property
-    def native_value(self) -> str | None:
-        """Return the hub firmware reported by YoLink Cloud."""
-        version = _cloud_state(self.device_state).get("version")
-        return str(version) if version is not None else None
-
-
 class YoLocalHubCloudBatteryStateSensor(YoLocalEntity, SensorEntity):
     """Operating state of the hub backup battery."""
 
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:battery-heart-variant"
-    _attr_name = "Cloud battery state"
+    _attr_name = "Battery state (cloud)"
     _attr_options = list(CLOUD_BATTERY_STATES.values())
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
@@ -523,7 +503,7 @@ class YoLocalHubCloudNetworkSensor(YoLocalEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:cloud-sync-outline"
-    _attr_name = "Cloud network"
+    _attr_name = "Network (cloud)"
     _attr_options = ["ethernet", "wi_fi", "disconnected"]
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
@@ -569,7 +549,7 @@ class YoLocalHubCloudComponentsSensor(YoLocalEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:expansion-card-variant"
-    _attr_name = "Cloud component versions"
+    _attr_name = "Component versions (cloud)"
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
         """Initialize the component-version sensor."""
@@ -607,7 +587,7 @@ class YoLocalHubLastCloudPollSensor(YoLocalEntity, SensorEntity):
     _attr_device_class = SensorDeviceClass.TIMESTAMP
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:cloud-clock-outline"
-    _attr_name = "Cloud last successful poll"
+    _attr_name = "Last successful poll (cloud)"
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
         """Initialize the cloud polling timestamp sensor."""
@@ -618,3 +598,18 @@ class YoLocalHubLastCloudPollSensor(YoLocalEntity, SensorEntity):
     def native_value(self) -> Any:
         """Return the timestamp of the last successful cloud update."""
         return self.device_state.get("lastCloudPoll")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return cloud health as attributes instead of duplicate entities."""
+        attributes: dict[str, Any] = {
+            "cloud_accessible": bool(
+                self.device_state.get("cloudConnected", False)
+            ),
+            "authenticated": bool(
+                self.device_state.get("cloudAuthenticated", False)
+            ),
+        }
+        if "cloudHubId" in self.device_state:
+            attributes["hub_device_id"] = self.device_state["cloudHubId"]
+        return attributes

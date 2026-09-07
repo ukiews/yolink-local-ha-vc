@@ -115,10 +115,12 @@ integration, select **Configure**, and enter a YoLink Personal Access Credential
 (UAC). Create a dedicated credential in the YoLink app under **Account →
 Advanced Settings → Personal Access Credentials**.
 
-Cloud diagnostics add the hub firmware version, hub online status, mains-power
-presence, backup-battery presence and operating state, active network details,
-and internal component versions. The UAC is stored only in the Home Assistant
-config entry. Clear both cloud credential fields to disable cloud access again.
+Cloud diagnostics add the hub firmware metadata, mains-power presence,
+backup-battery presence and operating state, active network details, and
+internal component versions. Cloud-only entity names use a `(cloud)` suffix and
+remain in the hub's diagnostic section. The UAC is stored only in the Home
+Assistant config entry. Clear both cloud credential fields to disable cloud
+access again.
 
 ## How It Works
 

@@ -52,11 +52,6 @@ async def async_setup_entry(
             entities.append(YoLocalHubMQTTConnectivitySensor(coordinator, device))
             entities.append(YoLocalHubAuthenticationSensor(coordinator, device))
             if coordinator.cloud_diagnostics_enabled:
-                entities.append(YoLocalHubCloudConnectivitySensor(coordinator, device))
-                entities.append(
-                    YoLocalHubCloudAuthenticationSensor(coordinator, device)
-                )
-                entities.append(YoLocalHubCloudOnlineSensor(coordinator, device))
                 entities.append(YoLocalHubCloudMainsPowerSensor(coordinator, device))
                 entities.append(
                     YoLocalHubCloudBatteryInstalledSensor(coordinator, device)
@@ -186,72 +181,13 @@ class YoLocalHubAuthenticationSensor(YoLocalEntity, BinarySensorEntity):
         return bool(self.device_state.get("authValid", False))
 
 
-class YoLocalHubCloudConnectivitySensor(YoLocalEntity, BinarySensorEntity):
-    """Connectivity status of optional YoLink Cloud diagnostics."""
-
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:cloud-check-outline"
-    _attr_name = "Cloud API"
-
-    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
-        """Initialize cloud API connectivity."""
-        super().__init__(coordinator, device)
-        self._attr_unique_id = f"{device.device_id}_cloud_connectivity"
-
-    @property
-    def is_on(self) -> bool:
-        """Return True after a successful cloud diagnostics request."""
-        return bool(self.device_state.get("cloudConnected", False))
-
-
-class YoLocalHubCloudAuthenticationSensor(YoLocalEntity, BinarySensorEntity):
-    """Authentication status of optional YoLink Cloud diagnostics."""
-
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:cloud-key-outline"
-    _attr_name = "Cloud authentication"
-
-    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
-        """Initialize cloud authentication status."""
-        super().__init__(coordinator, device)
-        self._attr_unique_id = f"{device.device_id}_cloud_authentication"
-
-    @property
-    def is_on(self) -> bool:
-        """Return True when cloud authentication last succeeded."""
-        return bool(self.device_state.get("cloudAuthenticated", False))
-
-
-class YoLocalHubCloudOnlineSensor(YoLocalEntity, BinarySensorEntity):
-    """Hub online status as reported by YoLink Cloud."""
-
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:hub-outline"
-    _attr_name = "Cloud hub online"
-
-    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
-        """Initialize cloud hub online status."""
-        super().__init__(coordinator, device)
-        self._attr_unique_id = f"{device.device_id}_cloud_online"
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return the hub online state reported by YoLink Cloud."""
-        if not self.device_state.get("cloudConnected", False):
-            return None
-        return bool(_cloud_state(self.device_state).get("online", False))
-
-
 class YoLocalHubCloudMainsPowerSensor(YoLocalEntity, BinarySensorEntity):
     """Whether the hub reports external DC/mains power."""
 
     _attr_device_class = BinarySensorDeviceClass.POWER
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:power-plug-battery-outline"
-    _attr_name = "Cloud mains power"
+    _attr_name = "Mains power (cloud)"
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
         """Initialize cloud mains-power status."""
@@ -273,7 +209,7 @@ class YoLocalHubCloudBatteryInstalledSensor(YoLocalEntity, BinarySensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:battery-check-outline"
-    _attr_name = "Cloud backup battery installed"
+    _attr_name = "Backup battery installed (cloud)"
 
     def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
         """Initialize cloud backup-battery presence."""
