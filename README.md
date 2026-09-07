@@ -1,8 +1,8 @@
-# YoLink Local
+# YoLink Local-VC
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
-A Home Assistant integration for YoLink devices using the **Local API** — no cloud required.
+A Home Assistant integration for YoLink devices using the **Local API** — no cloud required. This VC fork adds native valve control and broader battery reporting.
 
 This integration communicates directly with your YoLink Local Hub over your LAN using HTTP and MQTT, providing fast, reliable, and private control of your YoLink devices.
 
@@ -86,7 +86,7 @@ You'll need four pieces of information from the YoLink app:
 1. Open HACS in Home Assistant
 2. Click the **⋮** menu → **Custom repositories**
 3. Add `https://github.com/ukiews/yolink-local-ha-vc` with category **Integration**
-4. Search for "YoLink Local" and install
+4. Search for "YoLink Local-VC" and install
 5. Restart Home Assistant
 
 ### Manual Installation
@@ -99,7 +99,7 @@ You'll need four pieces of information from the YoLink app:
 
 1. Go to **Settings → Devices & Services**
 2. Click **Add Integration**
-3. Search for **YoLink Local**
+3. Search for **YoLink Local-VC**
 4. Enter your credentials:
    - **Hub IP**: Your hub's IP address
    - **Client ID**: From the Integrations tab
