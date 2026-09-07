@@ -90,6 +90,8 @@ async def async_setup_entry(
         if device.device_type == "Hub":
             entities.append(YoLocalHubIPAddressSensor(coordinator, device))
             entities.append(YoLocalHubDeviceCountSensor(coordinator, device))
+            entities.append(YoLocalHubOnlineDeviceCountSensor(coordinator, device))
+            entities.append(YoLocalHubOfflineDeviceCountSensor(coordinator, device))
             entities.append(YoLocalHubHTTPLatencySensor(coordinator, device))
             entities.append(YoLocalHubLastHTTPPollSensor(coordinator, device))
             entities.append(YoLocalHubLastMQTTMessageSensor(coordinator, device))
@@ -314,6 +316,46 @@ class YoLocalHubDeviceCountSensor(YoLocalEntity, SensorEntity):
             if source in self.device_state:
                 attributes[target] = self.device_state[source]
         return attributes
+
+
+class YoLocalHubOnlineDeviceCountSensor(YoLocalEntity, SensorEntity):
+    """Number of managed devices currently reported online."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:check-network-outline"
+    _attr_name = "Online devices"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the online-device count sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_online_devices"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of managed devices reported online."""
+        count = self.device_state.get("onlineDevices")
+        return count if isinstance(count, int) else None
+
+
+class YoLocalHubOfflineDeviceCountSensor(YoLocalEntity, SensorEntity):
+    """Number of managed devices currently reported offline."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:network-off-outline"
+    _attr_name = "Offline devices"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(self, coordinator: YoLocalCoordinator, device) -> None:
+        """Initialize the offline-device count sensor."""
+        super().__init__(coordinator, device)
+        self._attr_unique_id = f"{device.device_id}_offline_devices"
+
+    @property
+    def native_value(self) -> int | None:
+        """Return the number of managed devices reported offline."""
+        count = self.device_state.get("offlineDevices")
+        return count if isinstance(count, int) else None
 
 
 class YoLocalHubHTTPLatencySensor(YoLocalEntity, SensorEntity):
