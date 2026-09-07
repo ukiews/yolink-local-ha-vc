@@ -6,8 +6,10 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import entity_registry as er
 
+from .api import AuthenticationError
 from .const import (
     CONF_CLIENT_ID,
     CONF_CLIENT_SECRET,
@@ -74,9 +76,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             cloud_client_secret=entry.options.get(CONF_CLOUD_CLIENT_SECRET) or None,
             cloud_hub_id=entry.options.get(CONF_CLOUD_HUB_ID) or None,
         )
-    except Exception:
-        _LOGGER.exception("Failed to set up YoLink Local")
-        return False
+    except AuthenticationError as err:
+        raise ConfigEntryAuthFailed("YoLink Local authentication failed") from err
+    except Exception as err:
+        raise ConfigEntryNotReady(
+            "YoLink Local Hub is unavailable; setup will be retried"
+        ) from err
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
     _remove_obsolete_cloud_entities(hass, entry, coordinator)
