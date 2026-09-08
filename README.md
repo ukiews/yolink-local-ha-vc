@@ -128,6 +128,7 @@ access again.
 - **Initial State**: Each device's current state is fetched via HTTP
 - **Real-time Updates**: MQTT subscription receives instant state changes (door opens, temperature changes, etc.)
 - **Commands**: Lock/unlock, on/off, valve open/close, and other commands are sent via HTTP
+- **Resilient Polling**: Read failures are retried immediately; a single transient hub response does not make a device unavailable
 
 ## Troubleshooting
 
@@ -140,6 +141,9 @@ Check the Home Assistant logs for import errors. The integration requires `paho-
 - Verify the hub IP address is correct and reachable
 - Check that HTTP (port 1080) and MQTT (port 18080) are enabled on the hub
 - Ensure devices have been migrated to the Local Network in the YoLink app
+- Version 0.4.3 and newer preserves the last known state during an isolated HTTP
+  failure. A device is marked unavailable only after three consecutive failed
+  five-minute poll cycles, or immediately when MQTT explicitly reports it offline.
 
 ### State updates are delayed
 

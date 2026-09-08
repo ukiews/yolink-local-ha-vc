@@ -28,6 +28,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # Polling interval as fallback when MQTT events are missed
 UPDATE_INTERVAL = timedelta(minutes=5)
+DEVICE_POLL_ATTEMPTS = 3
+DEVICE_POLL_TIMEOUT_SECONDS = 10
+DEVICE_POLL_RETRY_DELAY_SECONDS = 1
+DEVICE_POLL_FAILURES_BEFORE_UNAVAILABLE = 3
 
 
 class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -64,6 +68,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt_client: YoLinkMQTTClient | None = None
         self._devices: dict[str, Device] = {}
         self._states: dict[str, dict[str, Any]] = {}
+        self._device_poll_failures: Counter[str] = Counter()
         self._virtual_hub_id: str | None = None
 
     @property
@@ -105,13 +110,8 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         for device in self._devices.values():
             if device.device_id == self._virtual_hub_id:
                 continue
-            try:
-                state = await self._client.get_state(device)
-                self._states[device.device_id] = state
-            except Exception:
-                _LOGGER.warning("Failed to get state for %s", device.name)
+            if not await self._async_poll_device_state(device):
                 all_device_polls_succeeded = False
-                self._states.setdefault(device.device_id, {})["online"] = False
 
         hub_poll_succeeded = await self._update_hub_diagnostics()
         state = self._hub_state()
@@ -121,6 +121,59 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 state["lastHttpPoll"] = datetime.now(timezone.utc)
             self._update_hub_runtime_diagnostics(state)
             await self._update_cloud_hub_diagnostics(state)
+
+    async def _async_poll_device_state(self, device: Device) -> bool:
+        """Poll one device without treating a transient error as an outage."""
+        last_error: Exception | None = None
+
+        for attempt in range(1, DEVICE_POLL_ATTEMPTS + 1):
+            try:
+                async with asyncio.timeout(DEVICE_POLL_TIMEOUT_SECONDS):
+                    state = await self._client.get_state(device)
+            except Exception as err:  # noqa: BLE001 - local API errors vary
+                last_error = err
+                if attempt < DEVICE_POLL_ATTEMPTS:
+                    await asyncio.sleep(DEVICE_POLL_RETRY_DELAY_SECONDS * attempt)
+            else:
+                previous_failures = self._device_poll_failures.pop(
+                    device.device_id, 0
+                )
+                self._states[device.device_id] = state
+                if previous_failures:
+                    _LOGGER.info(
+                        "State polling recovered for %s after %s failed poll cycle(s)",
+                        device.name,
+                        previous_failures,
+                    )
+                return True
+
+        consecutive_failures = self._device_poll_failures[device.device_id] + 1
+        self._device_poll_failures[device.device_id] = consecutive_failures
+        has_last_known_state = bool(self._states.get(device.device_id))
+        mark_unavailable = (
+            not has_last_known_state
+            or consecutive_failures >= DEVICE_POLL_FAILURES_BEFORE_UNAVAILABLE
+        )
+
+        if mark_unavailable:
+            self._states.setdefault(device.device_id, {})["online"] = False
+
+        disposition = (
+            "marking unavailable"
+            if mark_unavailable
+            else "preserving last known state"
+        )
+        _LOGGER.warning(
+            "Failed to get state for %s after %s attempts "
+            "(%s/%s consecutive failed poll cycles); %s; error=%r",
+            device.name,
+            DEVICE_POLL_ATTEMPTS,
+            consecutive_failures,
+            DEVICE_POLL_FAILURES_BEFORE_UNAVAILABLE,
+            disposition,
+            last_error,
+        )
+        return False
 
     def _hub_device(self) -> Device | None:
         """Return the real or synthesized hub device."""
@@ -304,8 +357,14 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.async_set_updated_data(self._states.copy())
             return
 
+        self._device_poll_failures.pop(device_id, None)
         existing = self._states.get(device_id, {})
-        self._states[device_id] = {**existing, **event.data}
+        updated = {**existing, **event.data}
+        # Receiving a report proves reachability unless it explicitly reports
+        # the device offline. This also clears a prior polling-only outage.
+        if event.data.get("online") is not False:
+            updated["online"] = True
+        self._states[device_id] = updated
         self.async_set_updated_data(self._states.copy())
 
     def get_state(self, device_id: str) -> dict[str, Any]:

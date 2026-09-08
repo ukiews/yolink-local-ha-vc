@@ -2,8 +2,11 @@ name: Publish release
 
 on:
   push:
-    tags:
-      - "*.*.*"
+    branches:
+      - main
+    paths:
+      - custom_components/yolocal/manifest.json
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,11 +15,32 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Create GitHub release
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read integration version
+        id: version
+        shell: bash
+        run: |
+          version=$(python -c 'import json; print(json.load(open("custom_components/yolocal/manifest.json"))["version"])')
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create version tag and GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          --repo "$GITHUB_REPOSITORY"
-          --title "$GITHUB_REF_NAME"
-          --generate-notes
+          VERSION: ${{ steps.version.outputs.value }}
+        shell: bash
+        run: |
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists"
+            exit 0
+          fi
+
+          git tag "$VERSION"
+          git push origin "$VERSION"
+          gh release create "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --generate-notes
