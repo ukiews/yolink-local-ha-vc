@@ -70,6 +70,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._states: dict[str, dict[str, Any]] = {}
         self._device_poll_failures: Counter[str] = Counter()
         self._virtual_hub_id: str | None = None
+        self._setup_complete = False
 
     @property
     def devices(self) -> dict[str, Device]:
@@ -82,7 +83,17 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return self._cloud_client is not None
 
     async def _async_setup(self) -> None:
-        """Set up the coordinator: fetch devices and connect MQTT."""
+        """Set up the coordinator: fetch devices and connect MQTT.
+
+        create_coordinator() runs this eagerly so setup errors surface before
+        the entry is stored, and DataUpdateCoordinator.async_config_entry_first_refresh()
+        calls _async_setup() again on current Home Assistant versions. Running it
+        twice created a second MQTT client and orphaned the first (never
+        disconnected, duplicate events and log lines), so only the first call
+        does the work.
+        """
+        if self._setup_complete:
+            return
         devices = await self._client.get_devices()
 
         # Some Local Hub firmware omits the hub from Home.getDeviceList. Add a
@@ -102,6 +113,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._fetch_all_states()
         await self._connect_mqtt()
+        self._setup_complete = True
 
     async def _fetch_all_states(self) -> None:
         """Fetch current state for all devices via HTTP API."""
