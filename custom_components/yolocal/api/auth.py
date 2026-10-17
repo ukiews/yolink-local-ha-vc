@@ -74,6 +74,17 @@ class TokenManager:
             raise AuthenticationError("No token available")
         return self._token
 
+    async def force_refresh(self) -> str:
+        """Obtain a new token even if the current one has not expired.
+
+        The hub can invalidate tokens early (e.g. after a reboot), so callers
+        that see an authorization failure use this instead of get_token().
+        """
+        await self._refresh()
+        if self._token is None:
+            raise AuthenticationError("No token available")
+        return self._token
+
     def _is_expired(self) -> bool:
         """Check if the token is expired or about to expire."""
         if self._token is None:
