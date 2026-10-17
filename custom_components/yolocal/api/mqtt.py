@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,10 +37,16 @@ class DeviceEvent:
 
 EventCallback = Callable[[DeviceEvent], None]
 ConnectionCallback = Callable[[bool], None]
+# Returns a current access token; True = force a new one from the hub.
+TokenProvider = Callable[[bool], Awaitable[str]]
 
 
 class YoLinkMQTTClient:
     """MQTT client for receiving real-time device events."""
+
+    # Minimum seconds between forced token refreshes after auth failures,
+    # so a hub that keeps rejecting us is not hammered with token requests.
+    FORCED_REFRESH_INTERVAL = 30.0
 
     def __init__(
         self,
@@ -48,6 +55,7 @@ class YoLinkMQTTClient:
         client_id: str,
         access_token: str,
         port: int = 18080,
+        token_provider: TokenProvider | None = None,
     ) -> None:
         """Initialize the MQTT client."""
         self._host = host
@@ -60,6 +68,8 @@ class YoLinkMQTTClient:
         self._connection_callbacks: list[ConnectionCallback] = []
         self._connected = asyncio.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._token_provider = token_provider
+        self._last_forced_refresh = 0.0
 
     @property
     def topic(self) -> str:
@@ -138,6 +148,10 @@ class YoLinkMQTTClient:
             self._notify_connection(True)
         else:
             _LOGGER.error("MQTT connection failed: %s", rc)
+            # The broker authenticates with the HTTP access token, which expires
+            # (~2h) and is invalidated when the hub restarts. Without fresh
+            # credentials paho would retry the stale token forever.
+            self._schedule_credential_refresh(force=True)
 
     def _on_disconnect(
         self,
@@ -151,6 +165,33 @@ class YoLinkMQTTClient:
         _LOGGER.warning("Disconnected from MQTT broker: %s", rc)
         self._connected.clear()
         self._notify_connection(False)
+        # Make sure the automatic reconnect uses a current token.
+        self._schedule_credential_refresh(force=False)
+
+    def _schedule_credential_refresh(self, force: bool) -> None:
+        """Refresh the MQTT password from the token provider (called from paho's thread)."""
+        if self._token_provider is None or self._loop is None:
+            return
+        if force:
+            now = time.monotonic()
+            if now - self._last_forced_refresh < self.FORCED_REFRESH_INTERVAL:
+                return
+            self._last_forced_refresh = now
+        asyncio.run_coroutine_threadsafe(self._refresh_credentials(force), self._loop)
+
+    async def _refresh_credentials(self, force: bool) -> None:
+        """Fetch a current token and use it for subsequent (re)connects."""
+        assert self._token_provider is not None
+        try:
+            token = await self._token_provider(force)
+        except Exception as err:  # noqa: BLE001 - hub may be unreachable; paho keeps retrying
+            _LOGGER.warning("Could not refresh access token for MQTT: %s", err)
+            return
+        if token != self._access_token:
+            self._access_token = token
+            if self._client is not None:
+                self._client.username_pw_set(self._client_id, token)
+            _LOGGER.info("Updated MQTT credentials with a refreshed access token")
 
     def _on_message(
         self,

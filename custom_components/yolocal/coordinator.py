@@ -316,6 +316,7 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             client_id=self._token_manager.client_id,
             access_token=token,
             port=self._mqtt_port,
+            token_provider=self._mqtt_token,
         )
         self._mqtt_client.subscribe(self._on_device_event)
         self._mqtt_client.subscribe_connection(self._on_mqtt_connection_change)
@@ -329,6 +330,12 @@ class YoLocalCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             if state is not None:
                 state["mqttConnected"] = False
                 self.async_set_updated_data(self._states.copy())
+
+    async def _mqtt_token(self, force: bool) -> str:
+        """Return a current access token for MQTT authentication."""
+        if force:
+            return await self._token_manager.force_refresh()
+        return await self._token_manager.get_token()
 
     @callback
     def _on_mqtt_connection_change(self, connected: bool) -> None:
